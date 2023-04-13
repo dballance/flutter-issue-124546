@@ -15,6 +15,9 @@ void main() async {
   final Logger log = Logger('Main');
   log.info('Started');
 
+  /// Uncomment the line below and save to trigger a reload
+  // log.info('Reload');
+
   log.info('Starting background isolate');
   const methodChannel = MethodChannel('com.example.demo/isolate');
 
