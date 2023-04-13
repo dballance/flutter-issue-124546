@@ -1,11 +1,114 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:isolate';
+import 'dart:ui';
 
-void main() {
-  runApp(const MyApp());
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:logging/logging.dart';
+
+const String mainId = 'main';
+const String backgroundId = 'background';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  Logger.root.onRecord.listen(ConsoleOutput().log);
+  final Logger log = Logger('Main');
+  log.info('Started');
+
+  log.info('Starting background isolate');
+  const methodChannel = MethodChannel('com.example.demo/isolate');
+
+  await methodChannel.invokeMethod('startService');
+
+  maybeCleanNameServer(mainId);
+  final ReceivePort port = ReceivePort(mainId);
+  IsolateNameServer.registerPortWithName(port.sendPort, mainId);
+
+  port.listen((message) {
+    log.info('Received object from background: $message');
+  });
+
+  log.info('Sending to background isolate.');
+
+  final sendPort = await waitForSendPort(backgroundId);
+
+  sendPort.send(const Value(0));
+
+  runApp(MyApp(sendPort: sendPort));
+}
+
+@pragma('vm:entry-point')
+Future<void> background() async {
+  final Logger log = Logger('Background');
+  Logger.root.onRecord.listen(ConsoleOutput().log);
+  log.info('Started');
+
+  /// Value stored here from the foreground
+  /// Note: This won't match up if you've closed the foreground isolate
+  /// by swiping up on the UI, which closes the `MainActivity`
+  int value = 0;
+
+  maybeCleanNameServer(backgroundId);
+
+  final ReceivePort port = ReceivePort(backgroundId);
+  IsolateNameServer.registerPortWithName(port.sendPort, backgroundId);
+
+  /// Listen for events - and if it's a [Value] then store the value locally
+  port.listen((message) {
+    log.info('Received object from main: $message');
+    if (message is Value) {
+      value = message.count;
+    }
+  });
+
+  /// Just here to show that we have bidirectional comms
+  log.info('Sending to main isolate.');
+  final sendPort = IsolateNameServer.lookupPortByName(mainId);
+
+  if (sendPort == null) {
+    log.severe('Main SendPort not found.');
+  } else {
+    sendPort.send(const Value(0));
+  }
+
+  /// Every 5 seconds, simulate some ongoing background process
+  /// and report the times the button has been pressed.
+  Timer.periodic(const Duration(seconds: 5), (timer) {
+    log.info('Simulated Activity - Current Value: $value');
+  });
+}
+
+/// If a port is already registered - clean it up
+void maybeCleanNameServer(String name) {
+  if (IsolateNameServer.lookupPortByName(name) != null) {
+    IsolateNameServer.removePortNameMapping(name);
+  }
+}
+
+/// Wait for a sendport at the given [name] to appear in the [IsolateNameServer]
+Future<SendPort> waitForSendPort(String name) async {
+  final sendPort = IsolateNameServer.lookupPortByName(mainId);
+  if (sendPort == null) {
+    return Future.delayed(const Duration(milliseconds: 100))
+        .then((_) => waitForSendPort(name));
+  }
+
+  return sendPort;
+}
+
+class Value {
+  final int count;
+
+  const Value(this.count);
+
+  @override
+  String toString() => 'Value($count)';
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, required this.sendPort});
+
+  final SendPort sendPort;
 
   // This widget is the root of your application.
   @override
@@ -24,13 +127,17 @@ class MyApp extends StatelessWidget {
         // is not restarted.
         primarySwatch: Colors.blue,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: MyHomePage(
+          title: 'Flutter Demo Home Page',
+          onIncrement: (value) {
+            sendPort.send(Value(value));
+          }),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+  const MyHomePage({super.key, required this.title, required this.onIncrement});
 
   // This widget is the home page of your application. It is stateful, meaning
   // that it has a State object (defined below) that contains fields that affect
@@ -42,6 +149,7 @@ class MyHomePage extends StatefulWidget {
   // always marked "final".
 
   final String title;
+  final void Function(int) onIncrement;
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -58,6 +166,7 @@ class _MyHomePageState extends State<MyHomePage> {
       // _counter without calling setState(), then the build method would not be
       // called again, and so nothing would appear to happen.
       _counter++;
+      widget.onIncrement(_counter);
     });
   }
 
@@ -111,5 +220,29 @@ class _MyHomePageState extends State<MyHomePage> {
         child: const Icon(Icons.add),
       ), // This trailing comma makes auto-formatting nicer for build methods.
     );
+  }
+}
+
+/// A log output handler, responsible for pushing a provided [LogRecord]
+/// to it's destination (console or otherwise)
+abstract class LogOutput {
+  void log(LogRecord record);
+}
+
+class ConsoleOutput extends LogOutput {
+  @override
+  void log(LogRecord record) {
+    //ignore: avoid_print
+    print(
+        '${record.level.name} · ${record.time} · ${record.loggerName} · ${record.message}');
+
+    if (record.error != null) {
+      //ignore: avoid_print
+      print(
+          '${record.level.name} · ${record.time} · ${record.loggerName}  · ${record.error}');
+      //ignore: avoid_print
+      print(
+          '${record.level.name} · ${record.time} · ${record.loggerName}  · ${record.stackTrace}');
+    }
   }
 }

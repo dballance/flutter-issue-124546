@@ -1,8 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.demo">
+    package="com.example.demo">    
+    
+    <!-- Required to run a Dart Isolate in ForegroundService -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+
    <application
         android:label="demo"
-        android:name="${applicationName}"
+        android:name=".App"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -30,5 +35,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+
+        <service
+            android:name=".ForegroundService"
+            android:enabled="true"
+            android:foregroundServiceType="location|microphone"
+            android:exported="false" />
     </application>
 </manifest>
