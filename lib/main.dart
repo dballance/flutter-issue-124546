@@ -32,6 +32,7 @@ void main() async {
 
   final sendPort = await waitForSendPort(backgroundId);
 
+  /// Reset any stored value in the background isolate
   sendPort.send(const Value(0));
 
   runApp(MyApp(sendPort: sendPort));
@@ -44,8 +45,6 @@ Future<void> background() async {
   log.info('Started');
 
   /// Value stored here from the foreground
-  /// Note: This won't match up if you've closed the foreground isolate
-  /// by swiping up on the UI, which closes the `MainActivity`
   int value = 0;
 
   maybeCleanNameServer(backgroundId);
@@ -53,23 +52,18 @@ Future<void> background() async {
   final ReceivePort port = ReceivePort(backgroundId);
   IsolateNameServer.registerPortWithName(port.sendPort, backgroundId);
 
+  log.info('Sending to main isolate.');
+  final sendPort = IsolateNameServer.lookupPortByName(mainId);
+
   /// Listen for events - and if it's a [Value] then store the value locally
+  /// and ack back (which shows bidirectional comms)
   port.listen((message) {
     log.info('Received object from main: $message');
     if (message is Value) {
       value = message.count;
+      sendPort?.send(Ack.fromValue(message));
     }
   });
-
-  /// Just here to show that we have bidirectional comms
-  log.info('Sending to main isolate.');
-  final sendPort = IsolateNameServer.lookupPortByName(mainId);
-
-  if (sendPort == null) {
-    log.severe('Main SendPort not found.');
-  } else {
-    sendPort.send(const Value(0));
-  }
 
   /// Every 5 seconds, simulate some ongoing background process
   /// and report the times the button has been pressed.
@@ -87,7 +81,7 @@ void maybeCleanNameServer(String name) {
 
 /// Wait for a sendport at the given [name] to appear in the [IsolateNameServer]
 Future<SendPort> waitForSendPort(String name) async {
-  final sendPort = IsolateNameServer.lookupPortByName(mainId);
+  final sendPort = IsolateNameServer.lookupPortByName(name);
   if (sendPort == null) {
     return Future.delayed(const Duration(milliseconds: 100))
         .then((_) => waitForSendPort(name));
@@ -103,6 +97,17 @@ class Value {
 
   @override
   String toString() => 'Value($count)';
+}
+
+class Ack {
+  final int count;
+
+  Ack._(this.count);
+
+  factory Ack.fromValue(Value value) => Ack._(value.count);
+
+  @override
+  String toString() => 'Ack($count)';
 }
 
 class MyApp extends StatelessWidget {
