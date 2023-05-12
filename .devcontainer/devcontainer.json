@@ -1,0 +1,15 @@
+{
+	"name": "flutter_dev",
+	"dockerFile": "Dockerfile",
+	"mounts": [
+		"source=/dev/bus/usb,target=/dev/bus/usb,type=bind"
+	],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "extensions": ["dart-code.dart-code", "dart-code.flutter"]
+      }
+    }
+  },
+	"runArgs": ["--privileged"]
+}

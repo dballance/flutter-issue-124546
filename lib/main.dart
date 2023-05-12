@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
 
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
@@ -15,8 +17,9 @@ void main() async {
   final Logger log = Logger('Main');
   log.info('Started');
 
-  /// Uncomment the line below and save to trigger a reload
-  // log.info('Reload');
+  /// Uncomment the line below and save to reload (and type 'r'
+  /// if running via `flutter run`)
+  log.info('Reload');
 
   log.info('Starting background isolate');
   const methodChannel = MethodChannel('com.example.demo/isolate');
@@ -38,11 +41,16 @@ void main() async {
   /// Reset any stored value in the background isolate
   sendPort.send(const Value(0));
 
+  /// Test a native plugin
+  final model = await _testNativePlugin();
+  log.info('Running on $model');
+
   runApp(MyApp(sendPort: sendPort));
 }
 
 @pragma('vm:entry-point')
 Future<void> background() async {
+  WidgetsFlutterBinding.ensureInitialized();
   final Logger log = Logger('Background');
   Logger.root.onRecord.listen(ConsoleOutput().log);
   log.info('Started');
@@ -73,6 +81,24 @@ Future<void> background() async {
   Timer.periodic(const Duration(seconds: 5), (timer) {
     log.info('Simulated Activity - Current Value: $value');
   });
+
+  /// Test a native plugin
+  final model = await _testNativePlugin();
+  log.info('Running on $model');
+}
+
+Future<String> _testNativePlugin() async {
+  DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
+    return androidInfo.model;
+  } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+    IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
+    return iosInfo.model;
+  }
+
+  return 'UNKNOWN';
 }
 
 /// If a port is already registered - clean it up
@@ -87,7 +113,8 @@ Future<SendPort> waitForSendPort(String name) async {
   final sendPort = IsolateNameServer.lookupPortByName(name);
   if (sendPort == null) {
     return Future.delayed(const Duration(milliseconds: 100))
-        .then((_) => waitForSendPort(name));
+        .then((_) => waitForSendPort(name))
+        .timeout(const Duration(seconds: 1));
   }
 
   return sendPort;
